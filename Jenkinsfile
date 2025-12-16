@@ -54,7 +54,7 @@ pipeline {
             }
         }
         
-       stage('Deploy to Production') {
+       stage('Deploy') {
             when {
                 expression { 
                     return env.BRANCH_NAME == 'main' || env.GIT_BRANCH == 'origin/main'
@@ -63,7 +63,7 @@ pipeline {
             steps {
                 script {
                     echo ' DEPLOYMENT STAGE - CD PROCESS'
-                    echo ' Branch: main - Deploying to production...'
+                    echo ' Branch: main - Deploying...'
                     
                     // Удаляем только контейнеры проекта, не трогая другие
                     bat '''
@@ -89,7 +89,6 @@ pipeline {
                     echo ' Checking container status...'
                     bat 'docker-compose ps'
                     
-                    env.DEPLOY_PERFORMED = 'true'
                     echo ' PRODUCTION DEPLOYMENT COMPLETE!'
                     echo ' Frontend: http://localhost:3000'
                     echo '  Backend API: http://localhost:8000'
@@ -97,49 +96,6 @@ pipeline {
             }
         }
         
-        stage('Post-Deploy Verification') {
-            when {
-                expression { 
-                    return (env.BRANCH_NAME == 'main' || env.GIT_BRANCH == 'origin/main') && env.DEPLOY_PERFORMED == 'true'
-                }
-            }
-            steps {
-                script {
-                    echo ' Verifying deployment...'
-                    bat 'docker-compose ps'
-                    
-                    // Проверка доступности с повторными попытками
-                    bat '''
-                        echo "Checking Frontend (max 3 attempts)..."
-                        for /l %%i in (1,1,3) do (
-                            curl http://localhost:3000 -I -s -o nul && (
-                                echo "Frontend is up!"
-                                exit /b 0
-                            ) || (
-                                echo "Attempt %%i: Frontend not ready yet"
-                                ping -n 2 127.0.0.1 > nul
-                            )
-                        )
-                    '''
-                    
-                    bat '''
-                        echo "Checking Backend (max 3 attempts)..."
-                        for /l %%i in (1,1,3) do (
-                            curl http://localhost:8000/api/contents/ -I -s -o nul && (
-                                echo "Backend is up!"
-                                exit /b 0
-                            ) || (
-                                echo "Attempt %%i: Backend not ready yet"
-                                ping -n 2 127.0.0.1 > nul
-                            )
-                        )
-                    '''
-                    
-                    echo ' Verification complete!'
-                }
-            }
-        }
-    }
     
     post {
         success {
