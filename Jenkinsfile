@@ -54,56 +54,55 @@ pipeline {
             }
         }
         
-        stage('Deploy to Production') {
-
+       stage('Deploy') {
             when {
-                branch 'main'
+                expression { 
+                    return env.BRANCH_NAME == 'main' || env.GIT_BRANCH == 'origin/main'
+                }
             }
             steps {
                 script {
-                    echo 'DEPLOYMENT STAGE - CD PROCESS'
-                    echo 'Branch: main - Deploying to production...'
+                    echo ' DEPLOYMENT STAGE - CD PROCESS'
+                    echo ' Branch: main - Deploying...'
                     
-                    bat 'docker-compose down 2>nul || echo "No running containers to stop"'
+                    // Удаляем только контейнеры проекта, не трогая другие
+                    bat '''
+                        echo Stopping project containers...
+                        docker-compose down 2>nul || echo "No project containers to stop"
+                        
+                        echo Removing specific containers if they exist...
+                        docker rm -f myapp_backend myapp_frontend 2>nul || echo "Containers not found"
+                        
+                        echo Cleaning up unused resources...
+                        docker network prune -f 2>nul
+                    '''
+                    
+                    // Запускаем контейнеры
+                    echo ' Starting application...'
                     bat 'docker-compose up -d --build'
                     
-                    bat 'timeout /t 10 /nobreak >nul'
+                    // Вместо timeout используем ping для ожидания (работает в Windows)
+                    echo ' Waiting for containers to start...'
+                    bat 'ping -n 10 127.0.0.1 > nul'
                     
-
-                    def status = bat(script: 'docker-compose ps', returnStdout: true)
-                    echo "Container status:\\n${status}"
+                    // Проверяем статус
+                    echo ' Checking container status...'
+                    bat 'docker-compose ps'
                     
-                    env.DEPLOY_PERFORMED = 'true'
-                    echo 'PRODUCTION DEPLOYMENT COMPLETE!'
-                    echo 'Frontend: http://localhost:3000'
-                    echo 'Backend API: http://localhost:8000'
+                    echo ' PRODUCTION DEPLOYMENT COMPLETE!'
+                    echo ' Frontend: http://localhost:3000'
+                    echo '  Backend API: http://localhost:8000'
                 }
             }
         }
         
-        stage('Post-Deploy Verification') {
-            when {
-                branch 'main'
-                expression { env.DEPLOY_PERFORMED == 'true' }
-            }
-            steps {
-                script {
-                    echo 'Verifying deployment...'
-                    bat 'docker-compose ps'
-                    bat 'curl http://localhost:3000 -I 2>nul || echo "Frontend starting..."'
-                    bat 'curl http://localhost:8000 -I 2>nul || echo "Backend starting..."'
-                    echo 'Verification complete!'
-                }
-            }
-        }
-    }
     
     post {
         success {
             script {
                 if (env.DEPLOY_PERFORMED == 'true') {
-                    echo 'CD PIPELINE SUCCESS - Application deployed to production!'
-                    echo '====== CD PROCESS COMPLETE ======'
+                    echo ' CD PIPELINE SUCCESS - Application deployed to production!'
+                    echo ' ====== CD PROCESS COMPLETE ======'
                 } else {
                     echo ' CI PIPELINE SUCCESS - Build and tests passed'
                     echo ' ====== CI PROCESS COMPLETE ======'
@@ -111,10 +110,10 @@ pipeline {
             }
         }
         failure {
-            echo 'Pipeline failed'
+            echo ' Pipeline failed'
         }
         always {
-            echo 'Cleaning workspace...'
+            echo ' Cleaning workspace...'
             cleanWs()
         }
     }
