@@ -98,7 +98,7 @@ pipeline {
                     
                     echo ' PRODUCTION DEPLOYMENT COMPLETE!'
                     echo ' Frontend: http://localhost:3000'
-                    echo '  Backend API: http://localhost:8000
+                    echo '  Backend API: http://localhost:8000'
                 }
             }
         }
