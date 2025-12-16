@@ -65,7 +65,16 @@ pipeline {
                 script {
                     echo 'DEPLOYMENT STAGE - CD PROCESS'
                     echo 'Branch: main - Deploying to production...'
-                    
+                     bat '''
+                        echo "Stopping and removing all containers..."
+                        docker-compose down --remove-orphans -v 2>nul || echo "No containers to stop"
+                        
+                        echo "Removing any dangling containers..."
+                        docker rm -f myapp_backend myapp_frontend 2>nul || echo "No containers to remove"
+                        
+                        echo "Cleaning up Docker system..."
+                        docker system prune -f 2>nul
+                    '''
                     bat 'docker-compose down 2>nul || echo "No running containers to stop"'
                     bat 'docker-compose up -d --build'
                     
