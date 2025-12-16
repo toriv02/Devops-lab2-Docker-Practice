@@ -57,7 +57,8 @@ pipeline {
         stage('Deploy to Production') {
 
             when {
-                branch 'main'
+                branch 'main' or  env.GIT_BRANCH == 'origin/main' 
+
             }
             steps {
                 script {
