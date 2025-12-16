@@ -67,31 +67,38 @@ pipeline {
                     
                     // Удаляем только контейнеры проекта, не трогая другие
                     bat '''
-                        echo Stopping project containers...
-                        docker-compose down 2>nul || echo "No project containers to stop"
+                        echo "Stopping and removing all project containers..."
+                        docker-compose down -v 2>nul || echo "No containers to stop"
                         
-                        echo Removing specific containers if they exist...
+                        echo "Removing specific containers by name..."
                         docker rm -f myapp_backend myapp_frontend 2>nul || echo "Containers not found"
                         
-                        echo Cleaning up unused resources...
-                        docker network prune -f 2>nul
+                        echo "Removing dangling containers..."
+                        docker ps -aq --filter "name=myapp" | xargs docker rm -f 2>nul || echo "No dangling containers"
+                        
+                        echo "Cleaning up networks..."
+                        docker network prune -f
                     '''
                     
                     // Запускаем контейнеры
-                    echo ' Starting application...'
-                    bat 'docker-compose up -d --build'
+                     echo ' Starting application...'
+                    bat 'docker-compose up -d --build --force-recreate'
                     
-                    // Вместо timeout используем ping для ожидания (работает в Windows)
+                    // Даем время на запуск
                     echo ' Waiting for containers to start...'
-                    bat 'ping -n 10 127.0.0.1 > nul'
+                    bat 'timeout /t 10 /nobreak > nul'
                     
                     // Проверяем статус
                     echo ' Checking container status...'
                     bat 'docker-compose ps'
                     
+                    // Проверяем логи для диагностики
+                    echo ' Checking container logs...'
+                    bat 'docker-compose logs --tail=20'
+                    
                     echo ' PRODUCTION DEPLOYMENT COMPLETE!'
                     echo ' Frontend: http://localhost:3000'
-                    echo '  Backend API: http://localhost:8000'
+                    echo '  Backend API: http://localhost:8000
                 }
             }
         }
