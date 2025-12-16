@@ -64,30 +64,19 @@ pipeline {
             steps {
                 script {
                     echo 'DEPLOYMENT STAGE - CD PROCESS'
-                    echo 'Branch: main - Deploying to production...'
-                     bat '''
-                        echo "Stopping and removing all containers..."
-                        docker-compose down --remove-orphans -v 2>nul || echo "No containers to stop"
-                        
-                        echo "Removing any dangling containers..."
-                        docker rm -f myapp_backend myapp_frontend 2>nul || echo "No containers to remove"
-                        
-                        echo "Cleaning up Docker system..."
-                        docker system prune -f 2>nul
-                    '''
-                    bat 'docker-compose down 2>nul || echo "No running containers to stop"'
-                    bat 'docker-compose up -d --build'
-                    
-                    bat 'timeout /t 10 /nobreak >nul'
-                    
 
-                    def status = bat(script: 'docker-compose ps', returnStdout: true)
-                    echo "Container status:\\n${status}"
-                    
-                    env.DEPLOY_PERFORMED = 'true'
-                    echo 'PRODUCTION DEPLOYMENT COMPLETE!'
-                    echo 'Frontend: http://localhost:3000'
-                    echo 'Backend API: http://localhost:8000'
+                      bat '''
+                        docker-compose down 2>nul || echo "Stopping old containers..."
+                        docker-compose up -d --build
+                        ping -n 15 127.0.0.1 > nul
+                        echo "=== APPLICATION STATUS ==="
+                        docker-compose ps
+                        echo "Frontend: http://localhost:3000"
+                        echo "Backend:  http://localhost:8000"
+                        echo "=== DEPLOYMENT COMPLETE ==="
+                    '''
+            
+                    env.DEPLOY_PERFORMED = 'true
                 }
             }
         }
