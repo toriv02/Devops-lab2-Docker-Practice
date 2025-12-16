@@ -1,0 +1,34 @@
+services:
+  backend:
+    build: .  
+    container_name: myapp_backend
+    ports:
+      - "8000:8000"
+    volumes:
+      - .:/app  
+      - ./db.sqlite3:/app/db.sqlite3
+    working_dir: /app
+    environment:
+      - DJANGO_SETTINGS_MODULE=app.settings  
+      - DEBUG=True
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8000/api/contents/"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 40s
+
+  frontend:
+    build: ./client
+    container_name: myapp_frontend
+    ports:
+      - "3000:80"
+    depends_on:
+      - backend
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "wget", "--no-verbose", "--tries=1", "--spider", "http://localhost:80"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
