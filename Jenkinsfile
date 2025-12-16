@@ -2,11 +2,7 @@ pipeline {
     agent any
     
     environment {
-        DOCKERHUB_USER = 'yaponchick1337'
-        DOCKERHUB_CREDENTIALS = 'dockerhub-creds'
-        
-        BACKEND_IMAGE = "${DOCKERHUB_USER}/devops-lab2-backend"
-        FRONTEND_IMAGE = "${DOCKERHUB_USER}/devops-lab2-frontend"
+        DOCKERHUB_USER = 'toriv00'
     }
     
     stages {
@@ -21,10 +17,10 @@ pipeline {
             steps {
                 script {
                     echo '🔨 Building Backend image...'
-                    bat "docker build -t ${BACKEND_IMAGE}:latest ."
+                    bat "docker build -t ${DOCKERHUB_USER}/devops-lab2-backend:latest ."
                     
                     echo '🔨 Building Frontend image...'
-                    bat "docker build -t ${FRONTEND_IMAGE}:latest client"
+                    bat "docker build -t ${DOCKERHUB_USER}/devops-lab2-frontend:latest client"
                 }
             }
         }
@@ -32,19 +28,21 @@ pipeline {
         stage('Push to Docker Hub') {
             steps {
                 script {
+                    // Используем withCredentials для передачи учетных данных
                     withCredentials([usernamePassword(
-                        credentialsId: env.DOCKERHUB_CREDENTIALS,
+                        credentialsId: 'dockerhub-creds',  // ID из Jenkins credentials
                         usernameVariable: 'DOCKER_USER',
                         passwordVariable: 'DOCKER_PASS'
                     )]) {
                         echo '🔐 Logging into Docker Hub...'
+                        // Для Windows используем такой синтаксис
                         bat "echo %DOCKER_PASS% | docker login -u %DOCKER_USER% --password-stdin"
                         
                         echo '📤 Pushing Backend image...'
-                        bat "docker push ${BACKEND_IMAGE}:latest"
+                        bat "docker push ${DOCKERHUB_USER}/devops-lab2-backend:latest"
                         
                         echo '📤 Pushing Frontend image...'
-                        bat "docker push ${FRONTEND_IMAGE}:latest"
+                        bat "docker push ${DOCKERHUB_USER}/devops-lab2-frontend:latest"
                         
                         bat 'docker logout'
                     }
