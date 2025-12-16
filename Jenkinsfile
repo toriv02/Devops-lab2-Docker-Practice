@@ -9,17 +9,17 @@ pipeline {
         stage('Checkout') {
             steps {
                 checkout scm
-                echo '✅ Code downloaded from Git'
+                echo ' Code downloaded from Git'
             }
         }
         
         stage('Build Docker Images') {
             steps {
                 script {
-                    echo '🔨 Building Backend image...'
+                    echo ' Building Backend image...'
                     bat "docker build -t ${DOCKERHUB_USER}/devops-lab2-backend:latest ."
                     
-                    echo '🔨 Building Frontend image...'
+                    echo ' Building Frontend image...'
                     bat "docker build -t ${DOCKERHUB_USER}/devops-lab2-frontend:latest client"
                 }
             }
@@ -28,20 +28,20 @@ pipeline {
         stage('Push to Docker Hub') {
             steps {
                 script {
-                    // Используем withCredentials для передачи учетных данных
+
                     withCredentials([usernamePassword(
-                        credentialsId: 'dockerhub-creds',  // ID из Jenkins credentials
+                        credentialsId: 'dockerhub-creds', 
                         usernameVariable: 'DOCKER_USER',
                         passwordVariable: 'DOCKER_PASS'
                     )]) {
-                        echo '🔐 Logging into Docker Hub...'
-                        // Для Windows используем такой синтаксис
+                        echo ' Logging into Docker Hub...'
+
                         bat "echo %DOCKER_PASS% | docker login -u %DOCKER_USER% --password-stdin"
                         
-                        echo '📤 Pushing Backend image...'
+                        echo ' Pushing Backend image...'
                         bat "docker push ${DOCKERHUB_USER}/devops-lab2-backend:latest"
                         
-                        echo '📤 Pushing Frontend image...'
+                        echo ' Pushing Frontend image...'
                         bat "docker push ${DOCKERHUB_USER}/devops-lab2-frontend:latest"
                         
                         bat 'docker logout'
@@ -55,14 +55,14 @@ pipeline {
                 branch 'main'
             }
             steps {
-                echo '🚀 Starting deployment...'
+                echo ' Starting deployment...'
                 script {
                     bat 'docker-compose down 2>nul || echo "No running containers"'
                     bat 'docker-compose up -d --build'
                     
-                    echo '✅ Deployment completed!'
-                    echo '🌐 Frontend: http://localhost:3000'
-                    echo '⚙️  Backend API: http://localhost:8000'
+                    echo 'Deployment completed!'
+                    echo ' Frontend: http://localhost:3000'
+                    echo '  Backend API: http://localhost:8000'
                 }
             }
         }
@@ -70,14 +70,14 @@ pipeline {
     
     post {
         always {
-            echo '🧹 Cleaning workspace...'
+            echo ' Cleaning workspace...'
             cleanWs()
         }
         success {
-            echo '🎉 Pipeline completed successfully!'
+            echo ' Pipeline completed successfully!'
         }
         failure {
-            echo '❌ Pipeline failed'
+            echo ' Pipeline failed'
         }
     }
 }
