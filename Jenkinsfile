@@ -54,8 +54,7 @@ pipeline {
             }
         }
         
-        stage('Deploy to Production') {
-
+       stage('Deploy to Production') {
             when {
                 expression { 
                     return env.BRANCH_NAME == 'main' || env.GIT_BRANCH == 'origin/main'
@@ -63,36 +62,80 @@ pipeline {
             }
             steps {
                 script {
-                    echo 'DEPLOYMENT STAGE - CD PROCESS'
-
-                      bat '''
-                        docker-compose down 2>nul || echo "Stopping old containers..."
-                        docker-compose up -d --build
-                        ping -n 15 127.0.0.1 > nul
-                        echo "=== APPLICATION STATUS ==="
-                        docker-compose ps
-                        echo "Frontend: http://localhost:3000"
-                        echo "Backend:  http://localhost:8000"
-                        echo "=== DEPLOYMENT COMPLETE ==="
+                    echo ' DEPLOYMENT STAGE - CD PROCESS'
+                    echo ' Branch: main - Deploying to production...'
+                    
+                    // Удаляем только контейнеры проекта, не трогая другие
+                    bat '''
+                        echo Stopping project containers...
+                        docker-compose down 2>nul || echo "No project containers to stop"
+                        
+                        echo Removing specific containers if they exist...
+                        docker rm -f myapp_backend myapp_frontend 2>nul || echo "Containers not found"
+                        
+                        echo Cleaning up unused resources...
+                        docker network prune -f 2>nul
                     '''
-            
-                    env.DEPLOY_PERFORMED = 'true
+                    
+                    // Запускаем контейнеры
+                    echo ' Starting application...'
+                    bat 'docker-compose up -d --build'
+                    
+                    // Вместо timeout используем ping для ожидания (работает в Windows)
+                    echo ' Waiting for containers to start...'
+                    bat 'ping -n 10 127.0.0.1 > nul'
+                    
+                    // Проверяем статус
+                    echo ' Checking container status...'
+                    bat 'docker-compose ps'
+                    
+                    env.DEPLOY_PERFORMED = 'true'
+                    echo ' PRODUCTION DEPLOYMENT COMPLETE!'
+                    echo ' Frontend: http://localhost:3000'
+                    echo '  Backend API: http://localhost:8000'
                 }
             }
         }
         
         stage('Post-Deploy Verification') {
             when {
-                branch 'main'
-                expression { env.DEPLOY_PERFORMED == 'true' }
+                expression { 
+                    return (env.BRANCH_NAME == 'main' || env.GIT_BRANCH == 'origin/main') && env.DEPLOY_PERFORMED == 'true'
+                }
             }
             steps {
                 script {
-                    echo 'Verifying deployment...'
+                    echo ' Verifying deployment...'
                     bat 'docker-compose ps'
-                    bat 'curl http://localhost:3000 -I 2>nul || echo "Frontend starting..."'
-                    bat 'curl http://localhost:8000 -I 2>nul || echo "Backend starting..."'
-                    echo 'Verification complete!'
+                    
+                    // Проверка доступности с повторными попытками
+                    bat '''
+                        echo "Checking Frontend (max 3 attempts)..."
+                        for /l %%i in (1,1,3) do (
+                            curl http://localhost:3000 -I -s -o nul && (
+                                echo "Frontend is up!"
+                                exit /b 0
+                            ) || (
+                                echo "Attempt %%i: Frontend not ready yet"
+                                ping -n 2 127.0.0.1 > nul
+                            )
+                        )
+                    '''
+                    
+                    bat '''
+                        echo "Checking Backend (max 3 attempts)..."
+                        for /l %%i in (1,1,3) do (
+                            curl http://localhost:8000/api/contents/ -I -s -o nul && (
+                                echo "Backend is up!"
+                                exit /b 0
+                            ) || (
+                                echo "Attempt %%i: Backend not ready yet"
+                                ping -n 2 127.0.0.1 > nul
+                            )
+                        )
+                    '''
+                    
+                    echo ' Verification complete!'
                 }
             }
         }
@@ -102,8 +145,8 @@ pipeline {
         success {
             script {
                 if (env.DEPLOY_PERFORMED == 'true') {
-                    echo 'CD PIPELINE SUCCESS - Application deployed to production!'
-                    echo '====== CD PROCESS COMPLETE ======'
+                    echo ' CD PIPELINE SUCCESS - Application deployed to production!'
+                    echo ' ====== CD PROCESS COMPLETE ======'
                 } else {
                     echo ' CI PIPELINE SUCCESS - Build and tests passed'
                     echo ' ====== CI PROCESS COMPLETE ======'
@@ -111,10 +154,10 @@ pipeline {
             }
         }
         failure {
-            echo 'Pipeline failed'
+            echo ' Pipeline failed'
         }
         always {
-            echo 'Cleaning workspace...'
+            echo ' Cleaning workspace...'
             cleanWs()
         }
     }
