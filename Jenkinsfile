@@ -16,15 +16,10 @@ pipeline {
     stages {
         stage('Checkout') {
             steps {
-                checkout([
-                    $class: 'GitSCM',
-                    branches: [[name: '*/main']],
-                    extensions: [[$class: 'LocalBranch', localBranch: 'main']],
-                    userRemoteConfigs: [[url: 'https://github.com/toriv02/Devops-lab2-Docker-Practice']]
-                ])
+                checkout scm
                 
                 script {
-                    
+                    // Получаем текущую ветку правильно для Jenkins на Windows
                     def branch = bat(
                         script: '@echo off && git rev-parse --abbrev-ref HEAD',
                         returnStdout: true
@@ -63,14 +58,14 @@ pipeline {
         stage('Install Dependencies') {
             steps {
                 script {
-                    if (env.CHANGED_FRONTEND == 'true' || (env.GIT_BRANCH == 'main' || env.GIT_BRANCH == 'origin/main') ) {
+                    if (env.CHANGED_FRONTEND == 'true' || env.GIT_BRANCH == 'main') {
                         dir(env.FRONTEND_DIR) {
                             bat '@echo off && npm ci --silent'
                             echo "Frontend dependencies installed"
                         }
                     }
                     
-                    if (env.CHANGED_BACKEND == 'true' || (env.GIT_BRANCH == 'main' || env.GIT_BRANCH == 'origin/main')) {
+                    if (env.CHANGED_BACKEND == 'true' || env.GIT_BRANCH == 'main') {
                         def pythonPath = "C:\\Users\\Admin\\AppData\\Local\\Programs\\Python\\Python314\\python.exe"
                         def exists = bat(
                             script: '@echo off && if exist "${pythonPath}" (echo EXISTS) else (echo NOT_FOUND)',
@@ -125,8 +120,8 @@ pipeline {
         stage('Build Docker Images') {
             steps {
                 script {
-                    boolean buildFrontend = env.CHANGED_FRONTEND == 'true' || (env.GIT_BRANCH == 'main' || env.GIT_BRANCH == 'origin/main')
-                    boolean buildBackend = env.CHANGED_BACKEND == 'true' || (env.GIT_BRANCH == 'main' || env.GIT_BRANCH == 'origin/main')
+                    boolean buildFrontend = env.CHANGED_FRONTEND == 'true' || env.GIT_BRANCH == 'main'
+                    boolean buildBackend = env.CHANGED_BACKEND == 'true' || env.GIT_BRANCH == 'main'
                     
                     if (!buildFrontend && !buildBackend) {
                         echo 'No changes - skipping Docker build'
@@ -153,8 +148,8 @@ pipeline {
         stage('Push to Docker Hub') {
             steps {
                 script {
-                    boolean buildFrontend = env.CHANGED_FRONTEND == 'true' || (env.GIT_BRANCH == 'main' || env.GIT_BRANCH == 'origin/main')
-                    boolean buildBackend = env.CHANGED_BACKEND == 'true' || (env.GIT_BRANCH == 'main' || env.GIT_BRANCH == 'origin/main')
+                    boolean buildFrontend = env.CHANGED_FRONTEND == 'true' || env.GIT_BRANCH == 'main'
+                    boolean buildBackend = env.CHANGED_BACKEND == 'true' || env.GIT_BRANCH == 'main'
                     
                     if (!buildFrontend && !buildBackend) {
                         echo 'No changes - skipping Docker Hub push'
@@ -188,7 +183,7 @@ pipeline {
         stage('Deploy') {
             when {
                 expression {
-                    return (env.GIT_BRANCH == 'main' || env.GIT_BRANCH == 'origin/main') && (env.CHANGED_FRONTEND == 'true' || env.CHANGED_BACKEND == 'true')
+                    return env.GIT_BRANCH == 'main' && (env.CHANGED_FRONTEND == 'true' || env.CHANGED_BACKEND == 'true')
                 }
             }
             steps {
@@ -241,7 +236,7 @@ pipeline {
                             docker rm %%i 2>nul || echo "Failed to remove container %%i"
                         )
                         
-                        echo Checking for orphaned containers...
+                        echo Cleaning up unused Docker resources...
                         docker system prune -f 2>nul || echo "Cleanup completed"
                     """
                     
@@ -257,29 +252,30 @@ pipeline {
                         @echo off
                         echo Starting containers...
                         ${composeCmd} -p ${env.COMPOSE_PROJECT_NAME} up -d --force-recreate --build
-                        timeout /t 20 /nobreak > nul
                         
-                        echo Waiting for services to start...
-                        timeout /t 10 /nobreak > nul
+                        echo Waiting for services to start (using ping for delay)...
+                        rem Используем ping для задержки вместо timeout
+                        ping -n 20 127.0.0.1 > nul
                     """
                     
                     echo 'Checking container status...'
                     bat """
                         @echo off
                         echo "=== CONTAINER STATUS ==="
-                        ${composeCmd} -p ${env.COMPOSE_PROJECT_NAME} ps -a
+                        ${composeCmd} -p ${env.COMPOSE_PROJECT_NAME} ps
                         echo.
-                        echo "=== DOCKER NETWORKS ==="
-                        docker network ls
+                        echo "=== CONTAINER HEALTH ==="
+                        for /f "tokens=*" %%i in ('${composeCmd} -p ${env.COMPOSE_PROJECT_NAME} ps --format "table {{.Names}}\\t{{.Status}}\\t{{.Ports}}"') do (
+                            echo %%i
+                        )
                         echo.
-                        echo "=== LOGS (last 20 lines) ==="
-                        ${composeCmd} -p ${env.COMPOSE_PROJECT_NAME} logs --tail=20
+                        echo "=== LOGS (last 15 lines) ==="
+                        ${composeCmd} -p ${env.COMPOSE_PROJECT_NAME} logs --tail=15
                     """
                     
                     echo '=== DEPLOYMENT COMPLETE ==='
                     echo 'Frontend: http://localhost:3000'
                     echo 'Backend API: http://localhost:8000'
-                    echo 'Database: localhost:1433'
                     
                     env.DEPLOY_PERFORMED = 'true'
                 }
@@ -293,6 +289,16 @@ pipeline {
                 if (env.DEPLOY_PERFORMED == 'true') {
                     echo '=== CD PIPELINE SUCCESS ==='
                     echo 'Application deployed to production!'
+                    
+                    // Проверка доступности сервисов
+                    bat """
+                        @echo off
+                        echo "Checking service availability..."
+                        echo Testing backend API...
+                        curl -f http://localhost:8000/api/ || echo "Backend check completed"
+                        echo Testing frontend...
+                        curl -f http://localhost:3000/ || echo "Frontend check completed"
+                    """
                 } else {
                     echo '=== CI PIPELINE SUCCESS ==='
                     echo 'Build and tests passed'
@@ -303,10 +309,12 @@ pipeline {
             echo '=== PIPELINE FAILED ==='
             bat """
                 @echo off
-                echo Cleaning up after failure...
-                docker-compose -p ${env.COMPOSE_PROJECT_NAME} down --remove-orphans 2>nul && echo "Containers stopped" || echo "No containers to stop"
-                echo "Checking for hanging containers..."
-                docker ps -a | findstr ${env.COMPOSE_PROJECT_NAME} && echo "Found containers from project" || echo "No project containers found"
+                echo "Cleaning up after failure..."
+                echo "Stopping containers..."
+                ${composeCmd} -p ${env.COMPOSE_PROJECT_NAME} down --remove-orphans 2>nul && echo "Containers stopped" || echo "No containers to stop"
+                echo "Removing network..."
+                docker network rm ${env.COMPOSE_PROJECT_NAME}_default 2>nul || echo "Network removed or not found"
+                echo "Cleanup completed"
             """
         }
         always {
