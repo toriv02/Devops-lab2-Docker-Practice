@@ -102,7 +102,7 @@ async function onUpdateContent() {
             placeholder="Название контента"
             required
           />
-          <label for="floatingInput">Название контента </label>
+          <label for="floatingInput">Название контента</label>
         </div>
       </div>
       <div class="col">

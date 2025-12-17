@@ -15,31 +15,46 @@ pipeline {
     stages {
         stage('Checkout') {
             steps {
-                checkout scm
+                checkout([
+                    $class: 'GitSCM',
+                    branches: [[name: '*/main']],
+                    extensions: [[$class: 'LocalBranch', localBranch: 'main']],
+                    userRemoteConfigs: [[url: 'https://github.com/toriv02/Devops-lab2-Docker-Practice']]
+                ])
+                
                 script {
+                    // Получаем текущую ветку правильно для Jenkins на Windows
                     def branch = bat(
-                        script: 'git branch --show-current',
+                        script: '@echo off && git rev-parse --abbrev-ref HEAD',
                         returnStdout: true
                     ).trim()
-                    env.GIT_BRANCH = branch
+                    
+                    // Убираем 'origin/' если есть
+                    env.GIT_BRANCH = branch.replace('origin/', '')
                     echo "Build for branch: ${env.GIT_BRANCH}"
                     
+                    // Получаем список измененных файлов
                     def changesRaw = bat(
-                        script: 'git diff --name-only HEAD~1 HEAD 2>nul || echo ""',
+                        script: '@echo off && git diff --name-only HEAD~1 HEAD 2>nul || git show --name-only --pretty="" HEAD 2>nul',
                         returnStdout: true
                     ).trim()
                     
                     def changedFiles = changesRaw ? changesRaw.split(/\r?\n/).collect { it.trim() }.findAll { it } : []
                     
                     env.CHANGED_FRONTEND = changedFiles.any { 
-                        it.startsWith("${env.FRONTEND_DIR}/") 
+                        it.startsWith("${env.FRONTEND_DIR}/") || it.contains("/${env.FRONTEND_DIR}/")
                     }.toString()
                     
                     env.CHANGED_BACKEND = changedFiles.any { 
-                        it.startsWith("${env.BACKEND_DIR}/") || it == 'requirements.txt' || it == 'manage.py'
+                        it.startsWith("${env.BACKEND_DIR}/") || 
+                        it.contains("/${env.BACKEND_DIR}/") || 
+                        it == 'requirements.txt' || 
+                        it == 'manage.py' ||
+                        it.endsWith('.py')
                     }.toString()
                     
                     echo "Frontend changed: ${env.CHANGED_FRONTEND}, Backend changed: ${env.CHANGED_BACKEND}"
+                    echo "Changed files: ${changedFiles}"
                 }
             }
         }
@@ -47,17 +62,17 @@ pipeline {
         stage('Install Dependencies') {
             steps {
                 script {
-                    if (env.CHANGED_FRONTEND == 'true') {
+                    if (env.CHANGED_FRONTEND == 'true' || env.GIT_BRANCH == 'main') {
                         dir(env.FRONTEND_DIR) {
-                            bat 'npm ci --silent'
+                            bat '@echo off && npm ci --silent'
                             echo "Frontend dependencies installed"
                         }
                     }
                     
-                    if (env.CHANGED_BACKEND == 'true') {
+                    if (env.CHANGED_BACKEND == 'true' || env.GIT_BRANCH == 'main') {
                         def pythonPath = "C:\\Users\\Admin\\AppData\\Local\\Programs\\Python\\Python314\\python.exe"
                         def exists = bat(
-                            script: "@echo off && if exist \"${pythonPath}\" (echo EXISTS) else (echo NOT_FOUND)",
+                            script: '@echo off && if exist "${pythonPath}" (echo EXISTS) else (echo NOT_FOUND)',
                             returnStdout: true
                         ).trim()
                         
@@ -85,19 +100,20 @@ pipeline {
         stage('Run Tests') {
             when {
                 expression {
-                    def branch = env.GIT_BRANCH ?: ''
-                    return branch != 'main' && branch != 'master'
+                    return env.GIT_BRANCH != 'main'
                 }
             }
             steps {
                 script {
-                    if (env.PYTHON_PATH && env.CHANGED_BACKEND == 'true') {
+                    if (env.PYTHON_PATH && (env.CHANGED_BACKEND == 'true' || params.FORCE_TESTS == true)) {
                         echo "Running Django tests"
                         bat """
                             @echo off
                             if exist "manage.py" (
                                 echo Running Django tests...
                                 "${env.PYTHON_PATH}" manage.py test --verbosity=2
+                            ) else (
+                                echo manage.py not found
                             )
                         """
                     }
@@ -108,8 +124,8 @@ pipeline {
         stage('Build Docker Images') {
             steps {
                 script {
-                    boolean buildFrontend = env.CHANGED_FRONTEND == 'true'
-                    boolean buildBackend = env.CHANGED_BACKEND == 'true'
+                    boolean buildFrontend = env.CHANGED_FRONTEND == 'true' || env.GIT_BRANCH == 'main'
+                    boolean buildBackend = env.CHANGED_BACKEND == 'true' || env.GIT_BRANCH == 'main'
                     
                     if (!buildFrontend && !buildBackend) {
                         echo 'No changes - skipping Docker build'
@@ -136,8 +152,8 @@ pipeline {
         stage('Push to Docker Hub') {
             steps {
                 script {
-                    boolean buildFrontend = env.CHANGED_FRONTEND == 'true'
-                    boolean buildBackend = env.CHANGED_BACKEND == 'true'
+                    boolean buildFrontend = env.CHANGED_FRONTEND == 'true' || env.GIT_BRANCH == 'main'
+                    boolean buildBackend = env.CHANGED_BACKEND == 'true' || env.GIT_BRANCH == 'main'
                     
                     if (!buildFrontend && !buildBackend) {
                         echo 'No changes - skipping Docker Hub push'
@@ -162,7 +178,6 @@ pipeline {
                             bat "docker push ${env.FRONTEND_IMAGE}:latest"
                         }
                         
-                        // Убрали docker logout отсюда - credentials управляются Jenkins
                         echo 'Images pushed to Docker Hub!'
                     }
                 }
@@ -172,15 +187,13 @@ pipeline {
         stage('Deploy') {
             when {
                 expression {
-                    def branch = env.GIT_BRANCH ?: ''
-                    return (branch == 'main' || branch == 'master') &&
-                           (env.CHANGED_FRONTEND == 'true' || env.CHANGED_BACKEND == 'true')
+                    return env.GIT_BRANCH == 'main'
                 }
             }
             steps {
                 script {
                     echo '=== DEPLOYING TO PRODUCTION ==='
-                    echo 'Branch: main/master - starting deploy'
+                    echo "Branch: ${env.GIT_BRANCH} - starting deploy"
                     
                     def composeExists = bat(
                         script: '@echo off && if exist "docker-compose.yml" (echo EXISTS) else (echo NOT_FOUND)',
