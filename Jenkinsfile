@@ -100,7 +100,7 @@ pipeline {
         stage('Run Tests') {
             when {
                 expression {
-                    return env.GIT_BRANCH != 'main'
+                    return env.GIT_env.GIT_BRANCH == 'main'
                 }
             }
             steps {
@@ -187,7 +187,7 @@ pipeline {
         stage('Deploy') {
             when {
                 expression {
-                    return env.GIT_BRANCH == 'main'
+                    return env.GIT_BRANCH == 'main' || env.GIT_BRANCH == 'master' || env.GIT_BRANCH == 'origin/main' || env.GIT_BRANCH == 'origin/master'
                 }
             }
             steps {
