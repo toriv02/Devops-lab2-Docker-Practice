@@ -1,14 +1,19 @@
 pipeline {
     agent any
-    
     environment {
-        FRONTEND_DIR = 'client'
-        BACKEND_DIR = 'project'
-        DOCKERHUB_USER = 'toriv00'
-        FRONTEND_IMAGE = "${DOCKERHUB_USER}/devops-lab2-frontend"
-        BACKEND_IMAGE = "${DOCKERHUB_USER}/devops-lab2-backend"
-        DOCKERHUB_CREDENTIALS = 'dockerhub-creds'
-        DEPLOY_PATH = '.'
+        // === НАСТРОЙКИ ПУТЕЙ ===
+        FRONTEND_ROOT = 'front'
+        FRONTEND_APP  = 'front/my-react-app'
+        BACKEND_DIR   = 'SimpleApp.Backend'
+        
+        // === НАСТРОЙКИ DOCKER HUB ===
+        DOCKERHUB_CREDENTIALS = 'docker-hub-creds'
+        DOCKERHUB_USER = 'yaponchick1337'
+        FRONTEND_IMAGE = 'yaponchick1337/simpleapp-frontend'
+        BACKEND_IMAGE  = 'yaponchick1337/simpleapp-backend'
+        
+        // === НАСТРОЙКИ ДЕПЛОЯ ===
+        DEPLOY_PATH = 'D:\\DevOps-Deploy\\SimpleApp'
         DEPLOY_CONFIG_NAME = 'docker-compose.yml'
     }
     
@@ -17,13 +22,7 @@ pipeline {
             steps {
                 checkout scm
                 script {
-                    def branch = bat(
-                        script: 'git branch --show-current',
-                        returnStdout: true
-                    ).trim()
-                    env.GIT_BRANCH = branch
-                    echo "Build for branch: ${env.GIT_BRANCH}"
-                    
+                    // Определение измененных файлов на русском
                     def changesRaw = bat(
                         script: 'git diff --name-only HEAD~1 HEAD 2>nul || echo ""',
                         returnStdout: true
@@ -31,139 +30,81 @@ pipeline {
                     
                     def changedFiles = changesRaw ? changesRaw.split(/\r?\n/).collect { it.trim() }.findAll { it } : []
                     
-                    env.CHANGED_FRONTEND = changedFiles.any { 
-                        it.startsWith("${env.FRONTEND_DIR}/") 
-                    }.toString()
+                    env.CHANGED_FRONTEND = changedFiles.any { it.startsWith("${env.FRONTEND_APP}/") }.toString()
+                    env.CHANGED_BACKEND  = changedFiles.any { it.startsWith("${env.BACKEND_DIR}/") }.toString()
                     
-                    env.CHANGED_BACKEND = changedFiles.any { 
-                        it.startsWith("${env.BACKEND_DIR}/") || it == 'requirements.txt' || it == 'manage.py'
-                    }.toString()
-                    
-                    echo "Frontend changed: ${env.CHANGED_FRONTEND}, Backend changed: ${env.CHANGED_BACKEND}"
+                    echo "Frontend изменен: ${env.CHANGED_FRONTEND}, Backend изменен: ${env.CHANGED_BACKEND}"
                 }
             }
         }
         
-        stage('Install Dependencies') {
+        stage('Install Dependencies and Tests') {
             steps {
                 script {
                     if (env.CHANGED_FRONTEND == 'true') {
-                        dir(env.FRONTEND_DIR) {
-                            bat 'npm ci --silent'
-                            echo "Frontend dependencies installed"
+                        dir(env.FRONTEND_APP) {
+                            echo 'Установка зависимостей фронтенда'
+                            try { 
+                                unstash 'frontend-modules' 
+                            } catch (e) { 
+                                bat 'npm install --silent'
+                                stash name: 'frontend-modules', includes: 'node_modules/**'
+                            }
+                            echo 'Запуск тестов фронтенда'
+                            bat 'npm test -- --watchAll=false --passWithNoTests --silent'
                         }
                     }
                     
                     if (env.CHANGED_BACKEND == 'true') {
-                        def pythonPath = "C:\\Users\\Admin\\AppData\\Local\\Programs\\Python\\Python314\\python.exe"
-                        def exists = bat(
-                            script: "@echo off && if exist \"${pythonPath}\" (echo EXISTS) else (echo NOT_FOUND)",
-                            returnStdout: true
-                        ).trim()
-                        
-                        if (exists.contains("EXISTS")) {
-                            env.PYTHON_PATH = pythonPath
-                            bat """
-                                @echo off
-                                echo Using Python from: ${env.PYTHON_PATH}
-                                
-                                if exist "requirements.txt" (
-                                    echo Installing Python dependencies...
-                                    "${env.PYTHON_PATH}" -m pip install -r requirements.txt
-                                ) else (
-                                    echo requirements.txt not found
-                                    "${env.PYTHON_PATH}" -m pip install django djangorestframework
-                                )
-                            """
-                            echo "Backend dependencies installed"
+                        dir(env.BACKEND_DIR) {
+                            echo 'Восстановление зависимостей бэкенда'
+                            bat 'dotnet restore --verbosity quiet'
+                            echo 'Запуск тестов бэкенда'
+                            bat 'dotnet test --no-build --verbosity normal'
                         }
                     }
                 }
             }
         }
         
-        stage('Run Tests') {
-            when {
-                expression {
-                    def branch = env.GIT_BRANCH ?: ''
-                    return branch != 'main' && branch != 'master'
-                }
-            }
+        stage('Build and Push Docker Images') {
             steps {
                 script {
-                    if (env.PYTHON_PATH && env.CHANGED_BACKEND == 'true') {
-                        echo "Running Django tests"
-                        bat """
-                            @echo off
-                            if exist "manage.py" (
-                                echo Running Django tests...
-                                "${env.PYTHON_PATH}" manage.py test --verbosity=2
-                            )
-                        """
-                    }
-                }
-            }
-        }
-        
-        stage('Build Docker Images') {
-            steps {
-                script {
-                    boolean buildFrontend = env.CHANGED_FRONTEND == 'true'
-                    boolean buildBackend = env.CHANGED_BACKEND == 'true'
+                    boolean buildFrontend = env.CHANGED_FRONTEND.toBoolean()
+                    boolean buildBackend  = env.CHANGED_BACKEND.toBoolean()
                     
                     if (!buildFrontend && !buildBackend) {
-                        echo 'No changes - skipping Docker build'
-                        return
-                    }
-                    
-                    echo 'Building Docker images...'
-                    
-                    if (buildBackend) {
-                        echo 'Building Backend image...'
-                        bat "docker build -t ${env.BACKEND_IMAGE}:latest ."
-                    }
-                    
-                    if (buildFrontend) {
-                        echo 'Building Frontend image...'
-                        bat "docker build -t ${env.FRONTEND_IMAGE}:latest ${env.FRONTEND_DIR}"
-                    }
-                    
-                    echo 'Docker images built successfully!'
-                }
-            }
-        }
-        
-        stage('Push to Docker Hub') {
-            steps {
-                script {
-                    boolean buildFrontend = env.CHANGED_FRONTEND == 'true'
-                    boolean buildBackend = env.CHANGED_BACKEND == 'true'
-                    
-                    if (!buildFrontend && !buildBackend) {
-                        echo 'No changes - skipping Docker Hub push'
+                        echo 'Нет изменений - сборка образов пропущена.'
                         return
                     }
                     
                     withCredentials([usernamePassword(
                         credentialsId: env.DOCKERHUB_CREDENTIALS,
                         usernameVariable: 'DOCKER_USER',
-                        passwordVariable: 'DOCKER_PASS'
+                        passwordVariable: 'DOCKER_TOKEN'
                     )]) {
-                        echo 'Logging into Docker Hub...'
-                        bat "echo %DOCKER_PASS% | docker login -u %DOCKER_USER% --password-stdin"
+                        echo "Авторизация в Docker Hub для пользователя ${env.DOCKERHUB_USER}..."
+                        bat 'echo %DOCKER_TOKEN% | docker login -u %DOCKER_USER% --password-stdin'
                         
+                        // Backend
                         if (buildBackend) {
-                            echo 'Pushing Backend image...'
+                            echo "Сборка: ${env.BACKEND_IMAGE}:latest"
+                            // ИСПРАВЛЕНИЕ: правильный путь к Dockerfile
+                            bat "docker build -t ${env.BACKEND_IMAGE}:latest -f ${env.BACKEND_DIR}/Dockerfile ."
+                            echo "Загрузка образа Backend..."
                             bat "docker push ${env.BACKEND_IMAGE}:latest"
                         }
                         
+                        // Frontend
                         if (buildFrontend) {
-                            echo 'Pushing Frontend image...'
+                            echo "Сборка: ${env.FRONTEND_IMAGE}:latest"
+                            bat "docker build -t ${env.FRONTEND_IMAGE}:latest -f ${env.FRONTEND_APP}/Dockerfile ${env.FRONTEND_APP}"
+                            echo "Загрузка образа Frontend..."
                             bat "docker push ${env.FRONTEND_IMAGE}:latest"
                         }
                         
-                        // Убрали docker logout отсюда - credentials управляются Jenkins
-                        echo 'Images pushed to Docker Hub!'
+                        // Logout
+                        bat 'docker logout'
                     }
                 }
             }
@@ -172,64 +113,64 @@ pipeline {
         stage('Deploy') {
             when {
                 expression {
-                    def branch = env.GIT_BRANCH ?: ''
-                    return (branch == 'main' || branch == 'master') &&
-                           (env.CHANGED_FRONTEND == 'true' || env.CHANGED_BACKEND == 'true')
+                    env.GIT_BRANCH == 'origin/main' &&
+                    (env.CHANGED_FRONTEND.toBoolean() || env.CHANGED_BACKEND.toBoolean())
                 }
             }
             steps {
                 script {
-                    echo '=== DEPLOYING TO PRODUCTION ==='
-                    echo 'Branch: main/master - starting deploy'
+                    def sourceFile = "${env.WORKSPACE}\\${env.DEPLOY_CONFIG_NAME}"
+                    def destDir = env.DEPLOY_PATH
+                    def destConfigFile = "${destDir}\\docker-compose.yml"
                     
-                    def composeExists = bat(
-                        script: '@echo off && if exist "docker-compose.yml" (echo EXISTS) else (echo NOT_FOUND)',
-                        returnStdout: true
-                    ).trim()
+                    // 1. Копирование файла
+                    powershell """
+                        # Проверяем наличие файла в рабочей области
+                        if (-not (Test-Path -Path '${sourceFile}')) {
+                            Write-Host "ОШИБКА: Исходный файл ${sourceFile} не найден"
+                            exit 1
+                        }
+                        
+                        # Создаем папку
+                        if (-not (Test-Path -Path '${destDir}')) {
+                            New-Item -Path '${destDir}' -ItemType Directory -Force | Out-Null
+                        }
+                        
+                        # Копируем файл
+                        Copy-Item -Path '${sourceFile}' -Destination '${destConfigFile}' -Force
+                        Write-Host "Файл скопирован: ${sourceFile} -> ${destConfigFile}"
+                    """
                     
-                    if (!composeExists.contains("EXISTS")) {
-                        error "docker-compose.yml not found!"
-                    }
+                    // 2. Деплой
+                    bat """
+                        cd /d "${destDir}"
+                        echo "Текущая директория: %cd%"
+                        echo "Проверка docker compose..."
+                        docker compose --version
+                        
+                        echo "Проверка конфигурации..."
+                        docker compose -f "docker-compose.yml" -p devops config
+                        if errorlevel 1 (
+                            echo "ОШИБКА: Неверный YAML файл!"
+                            exit 1
+                        )
+                        
+                        echo "Остановка старых контейнеров..."
+                        docker compose -f "docker-compose.yml" -p devops down --remove-orphans 2>nul || echo "Контейнеров не было"
+                        
+                        echo "Загрузка обновленных образов..."
+                        docker compose -f "docker-compose.yml" -p devops pull
+                        
+                        echo "Запуск новых контейнеров..."
+                        docker compose -f "docker-compose.yml" -p devops up -d --force-recreate
+                        
+                        echo "Проверка состояния контейнеров..."
+                        docker compose -f "docker-compose.yml" -p devops ps
+                    """
                     
-                    echo 'Stopping old containers...'
-                    bat '''
-                        @echo off
-                        echo Stopping existing containers...
-                        docker-compose down --remove-orphans 2>nul || echo "No containers to stop"
-                        docker-compose down -v 2>nul || echo "Cleanup done"
-                    '''
-                    
-                    echo 'Pulling latest images...'
-                    bat '''
-                        @echo off
-                        echo Pulling images...
-                        docker-compose pull || echo "Pull completed"
-                    '''
-                    
-                    echo 'Starting application...'
-                    bat '''
-                        @echo off
-                        echo Starting containers...
-                        docker-compose up -d --build
-                        timeout /t 15 /nobreak > nul
-                    '''
-                    
-                    echo 'Checking container status...'
-                    bat '''
-                        @echo off
-                        echo "=== CONTAINER STATUS ==="
-                        docker-compose ps
-                        echo.
-                        echo "=== LOGS ==="
-                        docker-compose logs --tail=10
-                    '''
-                    
-                    echo '=== DEPLOYMENT COMPLETE ==='
-                    echo 'Frontend: http://localhost:3000'
-                    echo 'Backend API: http://localhost:8000'
-                    echo 'Database: localhost:1433'
-                    
-                    env.DEPLOY_PERFORMED = 'true'
+                    echo "Деплой завершен:"
+                    echo "Фронтенд: http://localhost:3000"
+                    echo "Бэкенд: http://localhost:5215"
                 }
             }
         }
@@ -237,29 +178,14 @@ pipeline {
     
     post {
         success {
-            script {
-                if (env.DEPLOY_PERFORMED == 'true') {
-                    echo '=== CD PIPELINE SUCCESS ==='
-                    echo 'Application deployed to production!'
-                } else {
-                    echo '=== CI PIPELINE SUCCESS ==='
-                    echo 'Build and tests passed'
-                }
-            }
+            echo 'Pipeline успешно завершен'
         }
         failure {
-            echo '=== PIPELINE FAILED ==='
-            bat '''
-                @echo off
-                echo Cleaning up after failure...
-                docker-compose down 2>nul && echo "Containers stopped" || echo "No containers to stop"
-            '''
+            echo 'Pipeline завершился с ошибкой'
         }
         always {
-            echo "Build status: ${currentBuild.result ?: 'SUCCESS'}"
-            echo "Branch: ${env.GIT_BRANCH ?: 'not defined'}"
-            echo "Duration: ${currentBuild.durationString}"
             cleanWs()
+            bat 'docker logout 2>nul || echo "Docker logout attempted"'
         }
     }
 }
