@@ -185,7 +185,11 @@ pipeline {
         }
         
         stage('Deploy') {
-            
+            when {
+                expression {
+                    return env.GIT_BRANCH == 'main'
+                }
+            }
             steps {
                 script {
                     echo '=== DEPLOYING TO PRODUCTION ==='
