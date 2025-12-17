@@ -170,13 +170,7 @@ pipeline {
         }
         
         stage('Deploy') {
-            when {
-                expression {
-                    def branch = env.GIT_BRANCH ?: ''
-                    return (branch == 'main' || branch == 'master') &&
-                           (env.CHANGED_FRONTEND == 'true' || env.CHANGED_BACKEND == 'true')
-                }
-            }
+           
             steps {
                 script {
                     echo '=== DEPLOYING TO PRODUCTION ==='
