@@ -162,7 +162,7 @@ pipeline {
                             bat "docker push ${env.FRONTEND_IMAGE}:latest"
                         }
                         
-                        bat 'docker logout'
+                        // Убрали docker logout отсюда - credentials управляются Jenkins
                         echo 'Images pushed to Docker Hub!'
                     }
                 }
@@ -252,7 +252,7 @@ pipeline {
             bat '''
                 @echo off
                 echo Cleaning up after failure...
-                docker-compose down 2>nul || echo "Cleanup attempted"
+                docker-compose down 2>nul && echo "Containers stopped" || echo "No containers to stop"
             '''
         }
         always {
@@ -260,7 +260,6 @@ pipeline {
             echo "Branch: ${env.GIT_BRANCH ?: 'not defined'}"
             echo "Duration: ${currentBuild.durationString}"
             cleanWs()
-            bat 'docker logout 2>nul || echo "Docker logout done"'
         }
     }
 }
