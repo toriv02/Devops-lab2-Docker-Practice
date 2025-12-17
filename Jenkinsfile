@@ -10,6 +10,7 @@ pipeline {
         DOCKERHUB_CREDENTIALS = 'dockerhub-creds'
         DEPLOY_PATH = '.'
         DEPLOY_CONFIG_NAME = 'docker-compose.yml'
+        COMPOSE_PROJECT_NAME = 'devopslab2'
     }
     
     stages {
@@ -187,7 +188,7 @@ pipeline {
         stage('Deploy') {
             when {
                 expression {
-                    return env.GIT_BRANCH == 'main'
+                    return env.GIT_BRANCH == 'main' && (env.CHANGED_FRONTEND == 'true' || env.CHANGED_BACKEND == 'true')
                 }
             }
             steps {
@@ -204,38 +205,76 @@ pipeline {
                         error "docker-compose.yml not found!"
                     }
                     
+                    // Проверяем, какая команда docker compose доступна
+                    def composeCmdCheck = bat(
+                        script: '@echo off && docker compose version 2>nul && echo docker-compose || echo docker-compose',
+                        returnStdout: true
+                    ).trim()
+                    
+                    def composeCmd = composeCmdCheck.contains("docker compose") ? "docker compose" : "docker-compose"
+                    echo "Using compose command: ${composeCmd}"
+                    
                     echo 'Stopping old containers...'
-                    bat '''
+                    bat """
                         @echo off
                         echo Stopping existing containers...
-                        docker-compose down --remove-orphans 2>nul || echo "No containers to stop"
-                        docker-compose down -v 2>nul || echo "Cleanup done"
-                    '''
+                        ${composeCmd} -p ${env.COMPOSE_PROJECT_NAME} down --remove-orphans 2>nul || echo "No containers to stop"
+                        
+                        echo Checking for containers using port 8000...
+                        for /f "tokens=*" %%i in ('docker ps -q --filter "publish=8000"') do (
+                            echo Stopping container %%i using port 8000...
+                            docker stop %%i 2>nul || echo "Failed to stop container %%i"
+                            docker rm %%i 2>nul || echo "Failed to remove container %%i"
+                        )
+                        
+                        echo Checking for containers using port 3000...
+                        for /f "tokens=*" %%i in ('docker ps -q --filter "publish=3000"') do (
+                            echo Stopping container %%i using port 3000...
+                            docker stop %%i 2>nul || echo "Failed to stop container %%i"
+                            docker rm %%i 2>nul || echo "Failed to remove container %%i"
+                        )
+                        
+                        echo Checking for containers using port 1433...
+                        for /f "tokens=*" %%i in ('docker ps -q --filter "publish=1433"') do (
+                            echo Stopping container %%i using port 1433...
+                            docker stop %%i 2>nul || echo "Failed to stop container %%i"
+                            docker rm %%i 2>nul || echo "Failed to remove container %%i"
+                        )
+                        
+                        echo Checking for orphaned containers...
+                        docker system prune -f 2>nul || echo "Cleanup completed"
+                    """
                     
                     echo 'Pulling latest images...'
-                    bat '''
+                    bat """
                         @echo off
                         echo Pulling images...
-                        docker-compose pull || echo "Pull completed"
-                    '''
+                        ${composeCmd} -p ${env.COMPOSE_PROJECT_NAME} pull --quiet || echo "Pull completed"
+                    """
                     
                     echo 'Starting application...'
-                    bat '''
+                    bat """
                         @echo off
                         echo Starting containers...
-                        docker-compose up -d --build
-                        timeout /t 15 /nobreak > nul
-                    '''
+                        ${composeCmd} -p ${env.COMPOSE_PROJECT_NAME} up -d --force-recreate --build
+                        timeout /t 20 /nobreak > nul
+                        
+                        echo Waiting for services to start...
+                        timeout /t 10 /nobreak > nul
+                    """
                     
                     echo 'Checking container status...'
-                    bat '''
+                    bat """
                         @echo off
                         echo "=== CONTAINER STATUS ==="
-                        docker-compose ps
+                        ${composeCmd} -p ${env.COMPOSE_PROJECT_NAME} ps -a
                         echo.
-                        echo "=== LOGS ==="
-                        docker-compose logs --tail=10
-                    '''
+                        echo "=== DOCKER NETWORKS ==="
+                        docker network ls
+                        echo.
+                        echo "=== LOGS (last 20 lines) ==="
+                        ${composeCmd} -p ${env.COMPOSE_PROJECT_NAME} logs --tail=20
+                    """
                     
                     echo '=== DEPLOYMENT COMPLETE ==='
                     echo 'Frontend: http://localhost:3000'
@@ -262,11 +301,13 @@ pipeline {
         }
         failure {
             echo '=== PIPELINE FAILED ==='
-            bat '''
+            bat """
                 @echo off
                 echo Cleaning up after failure...
-                docker-compose down 2>nul && echo "Containers stopped" || echo "No containers to stop"
-            '''
+                docker-compose -p ${env.COMPOSE_PROJECT_NAME} down --remove-orphans 2>nul && echo "Containers stopped" || echo "No containers to stop"
+                echo "Checking for hanging containers..."
+                docker ps -a | findstr ${env.COMPOSE_PROJECT_NAME} && echo "Found containers from project" || echo "No project containers found"
+            """
         }
         always {
             echo "Build status: ${currentBuild.result ?: 'SUCCESS'}"
