@@ -24,7 +24,7 @@ pipeline {
                 ])
                 
                 script {
-                    // Получаем текущую ветку правильно для Jenkins на Windows
+                    
                     def branch = bat(
                         script: '@echo off && git rev-parse --abbrev-ref HEAD',
                         returnStdout: true
