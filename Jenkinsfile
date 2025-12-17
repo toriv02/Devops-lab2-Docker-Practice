@@ -62,14 +62,14 @@ pipeline {
         stage('Install Dependencies') {
             steps {
                 script {
-                    if (env.CHANGED_FRONTEND == 'true' || env.GIT_BRANCH == 'main') {
+                    if (env.CHANGED_FRONTEND == 'true' || env.GIT_BRANCH == ' origin/main') {
                         dir(env.FRONTEND_DIR) {
                             bat '@echo off && npm ci --silent'
                             echo "Frontend dependencies installed"
                         }
                     }
                     
-                    if (env.CHANGED_BACKEND == 'true' || env.GIT_BRANCH == 'main') {
+                    if (env.CHANGED_BACKEND == 'true' || env.GIT_BRANCH == ' origin/main') {
                         def pythonPath = "C:\\Users\\Admin\\AppData\\Local\\Programs\\Python\\Python314\\python.exe"
                         def exists = bat(
                             script: '@echo off && if exist "${pythonPath}" (echo EXISTS) else (echo NOT_FOUND)',
@@ -100,7 +100,7 @@ pipeline {
         stage('Run Tests') {
             when {
                 expression {
-                    return env.GIT_env.GIT_BRANCH == 'main'
+                    return env.GIT_env.GIT_BRANCH == ' origin/main'
                 }
             }
             steps {
@@ -124,8 +124,8 @@ pipeline {
         stage('Build Docker Images') {
             steps {
                 script {
-                    boolean buildFrontend = env.CHANGED_FRONTEND == 'true' || env.GIT_BRANCH == 'main'
-                    boolean buildBackend = env.CHANGED_BACKEND == 'true' || env.GIT_BRANCH == 'main'
+                    boolean buildFrontend = env.CHANGED_FRONTEND == 'true' || env.GIT_BRANCH == 'origin/main'
+                    boolean buildBackend = env.CHANGED_BACKEND == 'true' || env.GIT_BRANCH == 'origin/main'
                     
                     if (!buildFrontend && !buildBackend) {
                         echo 'No changes - skipping Docker build'
@@ -152,8 +152,8 @@ pipeline {
         stage('Push to Docker Hub') {
             steps {
                 script {
-                    boolean buildFrontend = env.CHANGED_FRONTEND == 'true' || env.GIT_BRANCH == 'main'
-                    boolean buildBackend = env.CHANGED_BACKEND == 'true' || env.GIT_BRANCH == 'main'
+                    boolean buildFrontend = env.CHANGED_FRONTEND == 'true' || env.GIT_BRANCH == 'origin/main'
+                    boolean buildBackend = env.CHANGED_BACKEND == 'true' || env.GIT_BRANCH == 'origin/main'
                     
                     if (!buildFrontend && !buildBackend) {
                         echo 'No changes - skipping Docker Hub push'
@@ -187,8 +187,7 @@ pipeline {
         stage('Deploy') {
             when {
                 expression {
-                    return env.GIT_BRANCH == 'main' || env.GIT_BRANCH == 'master' || env.GIT_BRANCH == 'origin/main' || env.GIT_BRANCH == 'origin/master'
-                }
+                    return env.GIT_BRANCH == ' origin/main' 
             }
             steps {
                 script {
