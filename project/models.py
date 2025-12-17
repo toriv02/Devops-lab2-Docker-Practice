@@ -21,5 +21,5 @@ class Type (models.Model):
         return self.name
 
 """
-
+!
 """
