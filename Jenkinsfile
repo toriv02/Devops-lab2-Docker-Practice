@@ -12,7 +12,7 @@ pipeline {
         DEPLOY_CONFIG_NAME = 'docker-compose.yml'
         COMPOSE_PROJECT_NAME = 'devopslab2'
     }
-    
+    stages{
    stage('Checkout') {
     steps {
         checkout scm
