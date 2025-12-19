@@ -78,7 +78,7 @@ async function onUpdateType() {
 
   <div class="check-type-container">
     <div v-if="!types.length">
-      <p class="text-white">Нет типов </p>
+      <p class="text-white">Нет типов</p>
     </div>
     <div v-else>
       <div v-for="item in types" :key="item.id" class="type-item">

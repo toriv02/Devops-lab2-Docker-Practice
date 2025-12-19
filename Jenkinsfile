@@ -14,43 +14,33 @@ pipeline {
     }
     
     stages {
-        stage('Clean Workspace') {
+        stage('Checkout') {
             steps {
-                cleanWs()
-            }
-        }
-        
-        stage('Checkout SCM') {
-            steps {
+                checkout([
+                    $class: 'GitSCM',
+                    branches: [[name: '*/main']],
+                    extensions: [[$class: 'LocalBranch', localBranch: 'main']],
+                    userRemoteConfigs: [[url: 'https://github.com/toriv02/Devops-lab2-Docker-Practice']]
+                ])
+                
                 script {
-                    // Явно очищаем workspace перед checkout
-                    bat '@echo off && if exist .git rmdir /s /q .git 2>nul || echo No .git folder to remove'
                     
-                    checkout([
-                        $class: 'GitSCM',
-                        branches: [[name: '*/main']],
-                        extensions: [[$class: 'CleanBeforeCheckout']], // Очищает workspace перед checkout
-                        userRemoteConfigs: [[url: 'https://github.com/toriv02/Devops-lab2-Docker-Practice']]
-                    ])
-                    
-                    // Получаем информацию о ветке
-                    env.GIT_BRANCH = sh(
-                        script: 'git rev-parse --abbrev-ref HEAD',
+                    def branch = bat(
+                        script: '@echo off && git rev-parse --abbrev-ref HEAD',
                         returnStdout: true
                     ).trim()
+                    
+                    // Убираем 'origin/' если есть
+                    env.GIT_BRANCH = branch.replace('origin/', '')
+                    echo "Build for branch: ${env.GIT_BRANCH}"
                     
                     // Получаем список измененных файлов
-                    def changesRaw = sh(
-                        script: '''
-                            git diff --name-only HEAD~1 HEAD 2>/dev/null || \
-                            git show --name-only --pretty="" HEAD 2>/dev/null || \
-                            echo "no_changes"
-                        ''',
+                    def changesRaw = bat(
+                        script: '@echo off && git diff --name-only HEAD~1 HEAD 2>nul || git show --name-only --pretty="" HEAD 2>nul',
                         returnStdout: true
                     ).trim()
                     
-                    def changedFiles = changesRaw != "no_changes" ? 
-                        changesRaw.split('\\n').collect { it.trim() }.findAll { it } : []
+                    def changedFiles = changesRaw ? changesRaw.split(/\r?\n/).collect { it.trim() }.findAll { it } : []
                     
                     env.CHANGED_FRONTEND = changedFiles.any { 
                         it.startsWith("${env.FRONTEND_DIR}/") || it.contains("/${env.FRONTEND_DIR}/")
@@ -64,7 +54,6 @@ pipeline {
                         it.endsWith('.py')
                     }.toString()
                     
-                    echo "Branch: ${env.GIT_BRANCH}"
                     echo "Frontend changed: ${env.CHANGED_FRONTEND}, Backend changed: ${env.CHANGED_BACKEND}"
                     echo "Changed files: ${changedFiles}"
                 }
@@ -74,14 +63,14 @@ pipeline {
         stage('Install Dependencies') {
             steps {
                 script {
-                    if (env.CHANGED_FRONTEND == 'true' || env.GIT_BRANCH == 'main') {
+                    if (env.CHANGED_FRONTEND == 'true' || (env.GIT_BRANCH == 'main' || env.GIT_BRANCH == 'origin/main') ) {
                         dir(env.FRONTEND_DIR) {
                             bat '@echo off && npm ci --silent'
                             echo "Frontend dependencies installed"
                         }
                     }
                     
-                    if (env.CHANGED_BACKEND == 'true' || env.GIT_BRANCH == 'main') {
+                    if (env.CHANGED_BACKEND == 'true' || (env.GIT_BRANCH == 'main' || env.GIT_BRANCH == 'origin/main')) {
                         def pythonPath = "C:\\Users\\Admin\\AppData\\Local\\Programs\\Python\\Python314\\python.exe"
                         def exists = bat(
                             script: '@echo off && if exist "${pythonPath}" (echo EXISTS) else (echo NOT_FOUND)',
@@ -136,8 +125,8 @@ pipeline {
         stage('Build Docker Images') {
             steps {
                 script {
-                    boolean buildFrontend = env.CHANGED_FRONTEND == 'true' || env.GIT_BRANCH == 'main'
-                    boolean buildBackend = env.CHANGED_BACKEND == 'true' || env.GIT_BRANCH == 'main'
+                    boolean buildFrontend = env.CHANGED_FRONTEND == 'true' || (env.GIT_BRANCH == 'main' || env.GIT_BRANCH == 'origin/main')
+                    boolean buildBackend = env.CHANGED_BACKEND == 'true' || (env.GIT_BRANCH == 'main' || env.GIT_BRANCH == 'origin/main')
                     
                     if (!buildFrontend && !buildBackend) {
                         echo 'No changes - skipping Docker build'
@@ -164,8 +153,8 @@ pipeline {
         stage('Push to Docker Hub') {
             steps {
                 script {
-                    boolean buildFrontend = env.CHANGED_FRONTEND == 'true' || env.GIT_BRANCH == 'main'
-                    boolean buildBackend = env.CHANGED_BACKEND == 'true' || env.GIT_BRANCH == 'main'
+                    boolean buildFrontend = env.CHANGED_FRONTEND == 'true' || (env.GIT_BRANCH == 'main' || env.GIT_BRANCH == 'origin/main')
+                    boolean buildBackend = env.CHANGED_BACKEND == 'true' || (env.GIT_BRANCH == 'main' || env.GIT_BRANCH == 'origin/main')
                     
                     if (!buildFrontend && !buildBackend) {
                         echo 'No changes - skipping Docker Hub push'
@@ -199,7 +188,7 @@ pipeline {
         stage('Deploy') {
             when {
                 expression {
-                    return env.GIT_BRANCH == 'main' && (env.CHANGED_FRONTEND == 'true' || env.CHANGED_BACKEND == 'true')
+                    return (env.GIT_BRANCH == 'main' || env.GIT_BRANCH == 'origin/main') && (env.CHANGED_FRONTEND == 'true' || env.CHANGED_BACKEND == 'true')
                 }
             }
             steps {
@@ -268,6 +257,7 @@ pipeline {
                         @echo off
                         echo Starting containers...
                         ${composeCmd} -p ${env.COMPOSE_PROJECT_NAME} up -d --force-recreate --build
+    
                         
                         echo Waiting for services to start...
                         ping -n 20 127.0.0.1 > nul
@@ -300,14 +290,6 @@ pipeline {
     }
     
     post {
-        always {
-            script {
-                echo "Build status: ${currentBuild.result ?: 'SUCCESS'}"
-                echo "Branch: ${env.GIT_BRANCH ?: 'not defined'}"
-                echo "Duration: ${currentBuild.durationString}"
-            }
-        }
-        
         success {
             script {
                 if (env.DEPLOY_PERFORMED == 'true') {
@@ -319,22 +301,20 @@ pipeline {
                 }
             }
         }
-        
         failure {
-            script {
-                echo '=== PIPELINE FAILED ==='
-                // Запускаем cleanup в отдельном блоке bat
-                bat """
-                    @echo off
-                    echo Cleaning up after failure...
-                    docker-compose -p ${env.COMPOSE_PROJECT_NAME} down --remove-orphans 2>nul && echo "Containers stopped" || echo "No containers to stop"
-                    echo "Checking for hanging containers..."
-                    docker ps -a | findstr ${env.COMPOSE_PROJECT_NAME} && echo "Found containers from project" || echo "No project containers found"
-                """
-            }
+            echo '=== PIPELINE FAILED ==='
+            bat """
+                @echo off
+                echo Cleaning up after failure...
+                docker-compose -p ${env.COMPOSE_PROJECT_NAME} down --remove-orphans 2>nul && echo "Containers stopped" || echo "No containers to stop"
+                echo "Checking for hanging containers..."
+                docker ps -a | findstr ${env.COMPOSE_PROJECT_NAME} && echo "Found containers from project" || echo "No project containers found"
+            """
         }
-        
-        cleanup {
+        always {
+            echo "Build status: ${currentBuild.result ?: 'SUCCESS'}"
+            echo "Branch: ${env.GIT_BRANCH ?: 'not defined'}"
+            echo "Duration: ${currentBuild.durationString}"
             cleanWs()
         }
     }
