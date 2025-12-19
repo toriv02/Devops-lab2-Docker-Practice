@@ -13,32 +13,23 @@ pipeline {
         COMPOSE_PROJECT_NAME = 'devopslab2'
     }
     
-    stages {
-        stage('Checkout') {
-            steps {
-                checkout([
-                    $class: 'GitSCM',
-                    branches: [[name: '*/main']],
-                    extensions: [[$class: 'LocalBranch', localBranch: 'main']],
-                    userRemoteConfigs: [[url: 'https://github.com/toriv02/Devops-lab2-Docker-Practice']]
-                ])
-                
-                script {
+   stage('Checkout') {
+    steps {
+        checkout scm
+        
+            script {
                     
-                    def branch = bat(
-                        script: '@echo off && git rev-parse --abbrev-ref HEAD',
-                        returnStdout: true
-                    ).trim()
+                    env.GIT_BRANCH = env.BRANCH_NAME ?: scm.branches[0].name
                     
-                    // Убираем 'origin/' если есть
-                    env.GIT_BRANCH = branch.replace('origin/', '')
                     echo "Build for branch: ${env.GIT_BRANCH}"
                     
-                    // Получаем список измененных файлов
-                    def changesRaw = bat(
-                        script: '@echo off && git diff --name-only HEAD~1 HEAD 2>nul || git show --name-only --pretty="" HEAD 2>nul',
+                    
+                    def changes = bat(
+                        script: '@echo off && git diff --name-only HEAD~1 HEAD 2>nul',
                         returnStdout: true
                     ).trim()
+                    
+            
                     
                     def changedFiles = changesRaw ? changesRaw.split(/\r?\n/).collect { it.trim() }.findAll { it } : []
                     
