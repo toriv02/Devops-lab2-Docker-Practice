@@ -30,9 +30,7 @@ pipeline {
                         returnStdout: true
                     ).trim()
                     
-                    // Убираем 'origin/' если есть
-                    env.GIT_BRANCH = branch.replace('origin/', '')
-                    echo "Build for branch: ${env.GIT_BRANCH}"
+
                     
                     // Получаем список измененных файлов
                     def changesRaw = bat(
